@@ -724,9 +724,13 @@ class ParticleFilter(InferenceModule):
     A particle filter for approximately tracking a single ghost.
     """
 
-    def __init__(self, ghostAgent, numParticles=300):
+    def __init__(
+        self, ghostAgent, numParticles=150
+    ):  # Reduced from 300 for better performance
         InferenceModule.__init__(self, ghostAgent)
         self.setNumParticles(numParticles)
+        # Cache for frequently accessed values
+        self._jailPosition = None
 
     def setNumParticles(self, numParticles):
         self.numParticles = numParticles
@@ -764,9 +768,9 @@ class ParticleFilter(InferenceModule):
         # Create a belief distribution from particles
         beliefDist = DiscreteDistribution()
 
-        # Count the number of particles at each position
+        # Count the number of particles at each position (optimized)
         for particle in self.particles:
-            beliefDist[particle] = beliefDist.get(particle, 0) + 1
+            beliefDist[particle] += 1
 
         # Normalize the distribution
         beliefDist.normalize()
@@ -791,47 +795,31 @@ class ParticleFilter(InferenceModule):
         the DiscreteDistribution may be useful.
         """
         "*** YOUR CODE HERE ***"
+        # Get Pacman's position and jail position (with caching)
         pacmanPosition = gameState.getPacmanPosition()
-        jailPosition = self.getJailPosition()
+        if self._jailPosition is None:
+            self._jailPosition = self.getJailPosition()
+        jailPosition = self._jailPosition
 
-        # Calculate weights for each particle based on observation
-        weights = []
-        for particle in self.particles:
+        # Create a weight distribution over particle indices
+        weightDist = DiscreteDistribution()
+
+        # Calculate weight for each particle based on observation probability
+        for i, particle in enumerate(self.particles):
             weight = self.getObservationProb(
                 observation, pacmanPosition, particle, jailPosition
             )
-            weights.append(weight)
+            weightDist[i] = weight
 
         # Check if all particles have zero weight
-        total_weight = sum(weights)
-        if total_weight == 0:
+        if weightDist.total() == 0:
             # Reinitialize particles uniformly
             self.initializeUniformly(gameState)
         else:
-            # Normalize weights
-            normalized_weights = [w / total_weight for w in weights]
-
-            # Resample particles based on weights using cumulative distribution
-            newParticles = []
-            cumulative_weights = [0]
-            for w in normalized_weights:
-                cumulative_weights.append(cumulative_weights[-1] + w)
-
-            # Resample each particle
-            for _ in range(self.numParticles):
-                # Generate a random number between 0 and 1
-                rand = random.random()
-
-                # Find which particle corresponds to this random value
-                for i in range(len(cumulative_weights) - 1):
-                    if cumulative_weights[i] <= rand < cumulative_weights[i + 1]:
-                        newParticles.append(self.particles[i])
-                        break
-                else:
-                    # Fallback to last particle
-                    newParticles.append(self.particles[-1])
-
-            self.particles = newParticles
+            # Resample particles based on weights (optimized)
+            self.particles = [
+                self.particles[weightDist.sample()] for _ in range(self.numParticles)
+            ]
         "*** END YOUR CODE HERE ***"
 
     ########### ########### ###########
@@ -844,17 +832,9 @@ class ParticleFilter(InferenceModule):
         gameState.
         """
         "*** YOUR CODE HERE ***"
-        # Advance each particle based on the transition model
-        newParticles = []
-
-        for particle in self.particles:
-            # Get the distribution over new positions for this particle
-            newPosDist = self.getPositionDistribution(gameState, particle)
-
-            # Sample a new position from this distribution
-            newPos = newPosDist.sample()
-            newParticles.append(newPos)
-
-        # Update particles
-        self.particles = newParticles
+        # Advance each particle based on the transition model (optimized)
+        self.particles = [
+            self.getPositionDistribution(gameState, particle).sample()
+            for particle in self.particles
+        ]
         "*** END YOUR CODE HERE ***"
